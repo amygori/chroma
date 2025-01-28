@@ -1,9 +1,6 @@
 use super::config::LogConfig;
 use crate::tracing::client_interceptor;
-use crate::types::{
-    CollectionInfo, GetCollectionsWithNewDataError, PullLogsError, UpdateCollectionLogOffsetError,
-};
-use crate::PushLogsError;
+use crate::types::CollectionInfo;
 use async_trait::async_trait;
 use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
@@ -17,6 +14,72 @@ use tonic::service::interceptor;
 use tonic::transport::Endpoint;
 use tonic::{Request, Status};
 use uuid::Uuid;
+
+#[derive(Error, Debug)]
+pub enum GrpcPullLogsError {
+    #[error("Failed to fetch")]
+    FailedToPullLogs(#[from] tonic::Status),
+    #[error("Failed to convert proto embedding record into EmbeddingRecord")]
+    ConversionError(#[from] RecordConversionError),
+}
+
+impl ChromaError for GrpcPullLogsError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            GrpcPullLogsError::FailedToPullLogs(_) => ErrorCodes::Internal,
+            GrpcPullLogsError::ConversionError(_) => ErrorCodes::Internal,
+        }
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum GrpcPushLogsError {
+    #[error("Failed to push logs")]
+    FailedToPushLogs(#[from] tonic::Status),
+    #[error("Failed to convert records to proto")]
+    ConversionError(#[from] RecordConversionError),
+}
+
+impl ChromaError for GrpcPushLogsError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            GrpcPushLogsError::FailedToPushLogs(_) => ErrorCodes::Internal,
+            GrpcPushLogsError::ConversionError(_) => ErrorCodes::Internal,
+        }
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum GrpcGetCollectionsWithNewDataError {
+    #[error("Failed to fetch")]
+    FailedGetCollectionsWithNewData(#[from] tonic::Status),
+}
+
+impl ChromaError for GrpcGetCollectionsWithNewDataError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            GrpcGetCollectionsWithNewDataError::FailedGetCollectionsWithNewData(_) => {
+                ErrorCodes::Internal
+            }
+        }
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum GrpcUpdateCollectionLogOffsetError {
+    #[error("Failed to update collection log offset")]
+    FailedToUpdateCollectionLogOffset(#[from] tonic::Status),
+}
+
+impl ChromaError for GrpcUpdateCollectionLogOffsetError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            GrpcUpdateCollectionLogOffsetError::FailedToUpdateCollectionLogOffset(_) => {
+                ErrorCodes::Internal
+            }
+        }
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct GrpcLog {
@@ -100,7 +163,7 @@ impl GrpcLog {
         offset: i64,
         batch_size: i32,
         end_timestamp: Option<i64>,
-    ) -> Result<Vec<LogRecord>, PullLogsError> {
+    ) -> Result<Vec<LogRecord>, GrpcPullLogsError> {
         let end_timestamp = match end_timestamp {
             Some(end_timestamp) => end_timestamp,
             None => i64::MAX,
@@ -124,7 +187,7 @@ impl GrpcLog {
                             result.push(log_record);
                         }
                         Err(err) => {
-                            return Err(PullLogsError::ConversionError(err));
+                            return Err(GrpcPullLogsError::ConversionError(err));
                         }
                     }
                 }
@@ -132,7 +195,7 @@ impl GrpcLog {
             }
             Err(e) => {
                 tracing::error!("Failed to pull logs: {}", e);
-                Err(PullLogsError::FailedToPullLogs(e))
+                Err(GrpcPullLogsError::FailedToPullLogs(e))
             }
         }
     }
@@ -141,7 +204,7 @@ impl GrpcLog {
         &mut self,
         collection_id: CollectionUuid,
         records: Vec<OperationRecord>,
-    ) -> Result<(), PushLogsError> {
+    ) -> Result<(), GrpcPushLogsError> {
         let request = chroma_proto::PushLogsRequest {
             collection_id: collection_id.0.to_string(),
 
@@ -160,7 +223,7 @@ impl GrpcLog {
     pub(super) async fn get_collections_with_new_data(
         &mut self,
         min_compaction_size: u64,
-    ) -> Result<Vec<CollectionInfo>, GetCollectionsWithNewDataError> {
+    ) -> Result<Vec<CollectionInfo>, GrpcGetCollectionsWithNewDataError> {
         let response = self
             .client
             .get_all_collection_info_to_compact(
@@ -196,7 +259,7 @@ impl GrpcLog {
             }
             Err(e) => {
                 tracing::error!("Failed to get collections: {}", e);
-                Err(GetCollectionsWithNewDataError::FailedGetCollectionsWithNewData(e))
+                Err(GrpcGetCollectionsWithNewDataError::FailedGetCollectionsWithNewData(e))
             }
         }
     }
@@ -205,7 +268,7 @@ impl GrpcLog {
         &mut self,
         collection_id: CollectionUuid,
         new_offset: i64,
-    ) -> Result<(), UpdateCollectionLogOffsetError> {
+    ) -> Result<(), GrpcUpdateCollectionLogOffsetError> {
         let request = self.client.update_collection_log_offset(
             chroma_proto::UpdateCollectionLogOffsetRequest {
                 // NOTE(rescrv):  Use the untyped string representation of the collection ID.
@@ -216,7 +279,7 @@ impl GrpcLog {
         let response = request.await;
         match response {
             Ok(_) => Ok(()),
-            Err(e) => Err(UpdateCollectionLogOffsetError::FailedToUpdateCollectionLogOffset(e)),
+            Err(e) => Err(GrpcUpdateCollectionLogOffsetError::FailedToUpdateCollectionLogOffset(e)),
         }
     }
 }

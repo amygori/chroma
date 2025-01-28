@@ -1,5 +1,5 @@
 use chroma_error::{ChromaError, ErrorCodes};
-use serde::{Deserialize, Serialize};
+use serde::{de::Visitor, Deserialize, Deserializer, Serialize, Serializer};
 use std::{
     cmp::Ordering,
     collections::{HashMap, HashSet},
@@ -89,6 +89,91 @@ impl TryFrom<&UpdateMetadataValue> for MetadataValue {
             UpdateMetadataValue::Str(value) => Ok(MetadataValue::Str(value.clone())),
             UpdateMetadataValue::None => Err(MetadataValueConversionError::InvalidValue),
         }
+    }
+}
+
+impl Serialize for UpdateMetadataValue {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match self {
+            UpdateMetadataValue::Bool(b) => serializer.serialize_bool(*b),
+            UpdateMetadataValue::Int(i) => serializer.serialize_i64(*i),
+            UpdateMetadataValue::Float(f) => serializer.serialize_f64(*f),
+            UpdateMetadataValue::Str(s) => serializer.serialize_str(s),
+            UpdateMetadataValue::None => serializer.serialize_unit(),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for UpdateMetadataValue {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct UpdateMetadataValueVisitor;
+
+        impl Visitor<'_> for UpdateMetadataValueVisitor {
+            type Value = UpdateMetadataValue;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("a bool, an integer, a float, a string, or null")
+            }
+
+            fn visit_bool<E>(self, value: bool) -> Result<Self::Value, E> {
+                Ok(UpdateMetadataValue::Bool(value))
+            }
+
+            fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E> {
+                Ok(UpdateMetadataValue::Int(value))
+            }
+
+            fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                // Because Serde may parse some integers as u64,
+                // convert to i64 if it fits, or fail otherwise:
+                if value <= i64::MAX as u64 {
+                    Ok(UpdateMetadataValue::Int(value as i64))
+                } else {
+                    Err(E::invalid_value(
+                        serde::de::Unexpected::Unsigned(value),
+                        &self,
+                    ))
+                }
+            }
+
+            fn visit_f64<E>(self, value: f64) -> Result<Self::Value, E> {
+                Ok(UpdateMetadataValue::Float(value))
+            }
+
+            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                Ok(UpdateMetadataValue::Str(value.to_owned()))
+            }
+
+            fn visit_string<E>(self, value: String) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                Ok(UpdateMetadataValue::Str(value))
+            }
+
+            fn visit_none<E>(self) -> Result<Self::Value, E> {
+                Ok(UpdateMetadataValue::None)
+            }
+
+            fn visit_unit<E>(self) -> Result<Self::Value, E> {
+                // null in JSON is represented as unit in Serde
+                Ok(UpdateMetadataValue::None)
+            }
+        }
+
+        deserializer.deserialize_any(UpdateMetadataValueVisitor)
     }
 }
 

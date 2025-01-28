@@ -15,9 +15,13 @@ tracing = { workspace = true }
 # Used by tracing
 tracing-opentelemetry = { workspace = true }
 uuid = { workspace = true }
+sqlx = { workspace = true }
+tokio = { workspace = true }
+serde_json = { workspace = true }
+bytemuck = { workspace = true }
+futures = { workspace = true }
 
 chroma-config = { workspace = true }
 chroma-error = { workspace = true }
 chroma-segment = { workspace = true }
 chroma-types = { workspace = true }
-
