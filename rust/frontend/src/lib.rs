@@ -1,10 +1,10 @@
 mod ac;
 mod config;
-mod errors;
 #[allow(dead_code)]
 mod executor;
 mod frontend;
 mod server;
+mod types;
 
 use chroma_config::Configurable;
 use config::FrontendConfig;
